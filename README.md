@@ -154,7 +154,15 @@ npm run converge -- forget                              # delete state, re-run, 
 npm run converge -- census                              # count objects; proves no duplication
 
 npm run eval                                            # 53-scenario reliability suite
+npm run smoke                                           # check the live API request shapes
 ```
+
+`npm run smoke` calls every live client against the real Slack, Notion and Linear APIs
+with a deliberately invalid token, and asserts each one comes back with that service's own
+authentication error. It cannot prove the integrations work — only credentials do that —
+but it does prove no live code path has a typo'd URL, wrong method or malformed body
+sitting in it undiscovered. That is the class of bug that kills a demo, and it lives
+precisely in the code nothing has ever executed.
 
 Inject faults on any run:
 

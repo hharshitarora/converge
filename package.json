@@ -10,7 +10,8 @@
   "scripts": {
     "converge": "tsx src/cli.ts",
     "eval": "tsx evals/run.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx evals/smoke-live.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
