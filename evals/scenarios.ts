@@ -26,6 +26,14 @@ export interface Scenario {
   expectBlind?: boolean;
   /** Include this scenario in the naive-baseline comparison. */
   baseline: boolean;
+  /**
+   * Converge a first customer, then converge a DIFFERENT one with --prune.
+   * Everything from the first must be gone, except the kinds we refuse to
+   * delete automatically, and the second must be fully present.
+   */
+  replaceWith?: string;
+  /** Remove what the spec no longer declares. */
+  prune?: boolean;
 }
 
 const KINDS = ["slack.channel", "notion.page", "linear.issue", "github.repo"] as const;
@@ -178,6 +186,50 @@ export function allScenarios(): Scenario[] {
     seed: seed++,
     runs: 2,
     breakBetween: [...targets],
+    baseline: false,
+  });
+
+  // --- family 8: pruning what the spec no longer declares -----------------
+  out.push({
+    name: "prune a replaced customer",
+    family: "pruning",
+    description:
+      "Onboard one customer, then converge a different one with --prune. The " +
+      "first customer's resources must be removed, the second fully present, " +
+      "and nothing duplicated.",
+    faults: [],
+    seed: seed++,
+    runs: 1,
+    replaceWith: "Globex Inc",
+    prune: true,
+    baseline: false,
+  });
+
+  out.push({
+    name: "prune is opt-in",
+    family: "pruning",
+    description:
+      "The same replacement WITHOUT --prune. The first customer's resources " +
+      "must survive untouched: the default run has no path that deletes.",
+    faults: [],
+    seed: seed++,
+    runs: 1,
+    replaceWith: "Globex Inc",
+    prune: false,
+    baseline: false,
+  });
+
+  out.push({
+    name: "prune survives a fault",
+    family: "pruning",
+    description:
+      "A delete fails on pass 1. It must not be retried in-pass; the next " +
+      "pass re-observes and removes what is still there.",
+    faults: [{ mode: "error_500", kind: "linear.issue", op: "update", onlyPasses: [1], maxFires: 1 }],
+    seed: seed++,
+    runs: 1,
+    replaceWith: "Globex Inc",
+    prune: true,
     baseline: false,
   });
 

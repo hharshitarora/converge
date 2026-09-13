@@ -19,6 +19,7 @@ export interface LinearClient {
     parentExternalId?: string,
   ): Promise<{ id: string; identifier: string }>;
   updateIssue(id: string, description: string): Promise<void>;
+  archiveIssue(id: string): Promise<void>;
 }
 
 export interface LinearIssueView {
@@ -63,6 +64,11 @@ export function linearIssueProvider(client: LinearClient): Provider {
         parentId,
       );
       return { externalId: r.id };
+    },
+
+    // Linear archives rather than destroys, and it is restorable.
+    async destroy(_spec, observed) {
+      await client.archiveIssue(observed.externalId!);
     },
 
     async update(spec, observed) {
@@ -113,6 +119,14 @@ export function mockLinear(world: MockWorld, g: GuardCtx): LinearClient {
         if (i) {
           i.description = description;
           world.record("linear", "update_issue", i.title);
+        }
+      }),
+    archiveIssue: (id) =>
+      guard(g, "update", K, () => {
+        const idx = world.data.linear.issues.findIndex((x) => x.id === id);
+        if (idx >= 0) {
+          world.record("linear", "archive_issue", world.data.linear.issues[idx]!.title);
+          world.data.linear.issues.splice(idx, 1);
         }
       }),
   };
@@ -166,6 +180,8 @@ export function liveLinear(apiKey: string, g: GuardCtx): LinearClient {
     "  issueUpdate(id:$id,input:$i){ success } }",
   ].join("\n");
 
+  const ARCHIVE = "mutation($id:String!){ issueArchive(id:$id){ success } }";
+
   return {
     findIssue: (teamKey, title) =>
       guard(g, "observe", K, async () => {
@@ -196,6 +212,11 @@ export function liveLinear(apiKey: string, g: GuardCtx): LinearClient {
     updateIssue: (id, description) =>
       guard(g, "update", K, async () => {
         await gql(UPDATE, { id, i: { description } });
+      }),
+
+    archiveIssue: (id) =>
+      guard(g, "update", K, async () => {
+        await gql(ARCHIVE, { id });
       }),
   };
 }

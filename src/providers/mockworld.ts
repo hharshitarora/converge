@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { mockId } from "./support.js";
 
 /**
  * In-memory twins of the four external apps, persisted to disk.
@@ -53,6 +52,20 @@ export interface WorldData {
   notion: { pages: NotionPage[] };
   linear: { issues: LinearIssue[] };
   github: { repos: GithubRepo[] };
+  /**
+   * Id counter, persisted WITH the world rather than held in the module.
+   *
+   * It lived in a module-level variable once, which reset on every process
+   * start while the world itself persisted to disk -- so a second CLI run
+   * minted C_0001 again and collided with a channel that already had it.
+   * Writes then landed on whichever record matched first, and convergence
+   * looped forever updating a field it was writing to the wrong object.
+   *
+   * Real services never recycle ids, so a twin that does is not a simpler
+   * model of one: it is a wrong one, and the eval suite that trusts it grades
+   * against fiction.
+   */
+  seq: number;
 }
 
 const empty = (): WorldData => ({
@@ -60,6 +73,7 @@ const empty = (): WorldData => ({
   notion: { pages: [] },
   linear: { issues: [] },
   github: { repos: [] },
+  seq: 0,
 });
 
 export class MockWorld {
@@ -69,6 +83,14 @@ export class MockWorld {
 
   constructor(data?: WorldData) {
     this.data = data ?? empty();
+    // Tolerate worlds written before the counter existed.
+    if (typeof this.data.seq !== "number") this.data.seq = 0;
+  }
+
+  /** Allocate an id that is unique for the life of this world, not this process. */
+  private nextId(prefix: string): string {
+    this.data.seq += 1;
+    return prefix + "_" + String(this.data.seq).padStart(4, "0");
   }
 
   static load(file: string): MockWorld {
@@ -109,7 +131,7 @@ export class MockWorld {
       throw new Error("slack: name_taken (" + name + ")");
     }
     const ch: SlackChannel = {
-      id: mockId("C"),
+      id: this.nextId("C"),
       name,
       topic,
       purpose,
@@ -126,7 +148,7 @@ export class MockWorld {
     );
   }
   createMessage(channelId: string, text: string): SlackMessage {
-    const m: SlackMessage = { id: mockId("msg"), channelId, text };
+    const m: SlackMessage = { id: this.nextId("msg"), channelId, text };
     this.data.slack.messages.push(m);
     this.record("slack", "post_message", channelId);
     return m;
@@ -140,7 +162,7 @@ export class MockWorld {
   }
   createPage(parentId: string, title: string, props: Record<string, unknown>) {
     const pg: NotionPage = {
-      id: mockId("page"),
+      id: this.nextId("page"),
       parentId,
       title,
       props,
@@ -165,7 +187,7 @@ export class MockWorld {
   ) {
     const n = this.data.linear.issues.filter((i) => i.teamKey === teamKey).length + 1;
     const issue: LinearIssue = {
-      id: mockId("iss"),
+      id: this.nextId("iss"),
       identifier: `${teamKey}-${n}`,
       teamKey,
       title,
@@ -184,7 +206,7 @@ export class MockWorld {
   }
   createRepo(name: string, description: string, topics: string[] = []) {
     const repo: GithubRepo = {
-      id: mockId("repo"),
+      id: this.nextId("repo"),
       name,
       description,
       private: true,
@@ -195,10 +217,16 @@ export class MockWorld {
     return repo;
   }
 
-  /** Count of externally-visible objects, used to assert "no duplicates". */
+  /**
+   * Count of LIVE objects, used to assert "no duplicates".
+   *
+   * Archived channels and pages are excluded deliberately: two objects are
+   * only a duplicate if both are actually present to a user. An archived
+   * channel is the result of a removal, not a second copy.
+   */
   census(): Record<string, number> {
     return {
-      "slack.channel": this.data.slack.channels.length,
+      "slack.channel": this.data.slack.channels.filter((c) => !c.archived).length,
       "slack.message": this.data.slack.messages.length,
       "notion.page": this.data.notion.pages.filter((p) => !p.archived).length,
       "linear.issue": this.data.linear.issues.length,

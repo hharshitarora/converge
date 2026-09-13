@@ -77,12 +77,29 @@ function renderPlan(plan: Plan, spec: Spec) {
       );
     }
   }
+  // Orphans sit below the spec's own resources: they are no longer part of it.
+  for (const o of plan.orphans) {
+    const label = APP_LABEL[o.kind] ?? o.kind;
+    if (o.unobservable) {
+      console.log(
+        "  " + label + C.yellow("!") + " " + o.naturalKey.padEnd(38) +
+          C.yellow("orphaned") + C.grey(" -- " + o.unobservable),
+      );
+    } else {
+      console.log(
+        "  " + label + C.red("-") + " " + o.naturalKey.padEnd(38) +
+          C.red("orphaned") + C.grey(" -- --prune to remove"),
+      );
+    }
+  }
+
   console.log();
   const creates = plan.changes.filter((c) => c.action === "create").length;
   const updates = plan.changes.filter((c) => c.action === "update").length;
   console.log(
     "  " + C.bold("Plan:") + " " + creates + " to create, " + updates +
       " to update, " + inSync + " unchanged" +
+      (plan.orphans.length ? C.yellow(", " + plan.orphans.length + " orphaned") : "") +
       (plan.blind.length ? C.red(", " + plan.blind.length + " unreadable") : ""),
   );
   console.log();
@@ -158,6 +175,7 @@ async function main() {
   const argv = process.argv.slice(2);
   const cmd = argv[0] ?? "help";
   const verbose = argv.includes("-v") || argv.includes("--verbose");
+  const prune = argv.includes("--prune");
   const live = process.env.CONVERGE_LIVE === "1";
 
   const notionParent = process.env.NOTION_PARENT_PAGE_ID ?? "mock-parent";
@@ -184,6 +202,7 @@ async function main() {
         "  " + C.cyan("reset") + "               wipe the mock world and ledger",
         "",
         "  flags: -v  verbose trace",
+        "         --prune  remove resources the spec no longer declares (opt-in)",
         "         --fault <mode>[:<kind>][:<op>]   inject a fault on pass 1",
         "         modes: lost_ack partial_write error_500 rate_limit auth_fail timeout",
         "",
@@ -327,7 +346,7 @@ async function main() {
 
   // --- plan only ---------------------------------------------------------
   if (cmd === "plan" || cmd === "drift") {
-    const plan = await buildPlan(spec, registry.providers, ctx);
+    const plan = await buildPlan(spec, registry.providers, ctx, { exact: prune });
     renderPlan(plan, spec);
     if (plan.converged) {
       console.log("  " + C.green("converged") + C.grey(" -- the world already matches the spec"));
@@ -340,7 +359,7 @@ async function main() {
 
   // --- apply -------------------------------------------------------------
   const t0 = Date.now();
-  const result = await apply(spec, registry.providers, ctx);
+  const result = await apply(spec, registry.providers, ctx, { prune });
   if (!live) world.save(WORLD_FILE);
 
   renderPlan(result.initialPlan, spec);
@@ -360,8 +379,14 @@ async function main() {
           ", " + (Date.now() - t0) + "ms",
     ),
   );
-  if (result.created.length)
-    console.log("  " + C.grey("created: " + result.created.length + "  updated: " + result.updated.length));
+  if (result.created.length || result.updated.length || result.destroyed.length)
+    console.log(
+      "  " + C.grey(
+        "created: " + result.created.length +
+        "  updated: " + result.updated.length +
+        "  removed: " + result.destroyed.length,
+      ),
+    );
 
   const faults = events.filter((e) => e.fault);
   if (faults.length) {

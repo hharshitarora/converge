@@ -22,6 +22,7 @@ export interface SlackMessageClient {
   findMessage(channelId: string, marker: string): Promise<{ id: string; text: string } | null>;
   postMessage(channelId: string, text: string): Promise<{ id: string }>;
   editMessage(channelId: string, id: string, text: string): Promise<void>;
+  deleteMessage(channelId: string, id: string): Promise<void>;
 }
 
 /** Zero-width marker: invisible to humans, unique per resource. */
@@ -70,6 +71,14 @@ export function slackMessageProvider(client: SlackMessageClient): Provider {
       return { externalId: r.id };
     },
 
+    // A bot may delete its own messages, and a stale kickoff brief pointing at
+    // resources that no longer exist is worse than no brief at all.
+    async destroy(spec, observed, ctx) {
+      const channelId = ctx.state.get(String(spec.desired.channelKey ?? ""));
+      if (!channelId) throw new Error("slack.message: channel not resolved");
+      await client.deleteMessage(channelId, observed.externalId!);
+    },
+
     async update(spec, observed, _fields, ctx) {
       const channelId = ctx.state.get(String(spec.desired.channelKey ?? ""));
       if (!channelId) throw new Error("slack.message: channel not resolved yet");
@@ -107,6 +116,14 @@ export function mockSlackMessage(world: MockWorld, g: GuardCtx): SlackMessageCli
         if (m) {
           m.text = text;
           world.record("slack", "edit_message", id);
+        }
+      }),
+    deleteMessage: (_channelId, id) =>
+      guard(g, "update", K, () => {
+        const idx = world.data.slack.messages.findIndex((x) => x.id === id);
+        if (idx >= 0) {
+          world.data.slack.messages.splice(idx, 1);
+          world.record("slack", "delete_message", id);
         }
       }),
   };
@@ -154,6 +171,10 @@ export function liveSlackMessage(token: string, g: GuardCtx): SlackMessageClient
     editMessage: (channel, ts, text) =>
       guard(g, "update", K, async () => {
         await call("chat.update", { channel, ts, text });
+      }),
+    deleteMessage: (channel, ts) =>
+      guard(g, "update", K, async () => {
+        await call("chat.delete", { channel, ts });
       }),
   };
 }

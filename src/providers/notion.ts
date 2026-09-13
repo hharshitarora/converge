@@ -14,6 +14,7 @@ export interface NotionClient {
   findPage(parentId: string, title: string): Promise<NotionPageView | null>;
   createPage(parentId: string, title: string, summary: string): Promise<{ id: string }>;
   updatePage(id: string, title: string, summary: string): Promise<void>;
+  archivePage(id: string): Promise<void>;
 }
 
 export interface NotionPageView {
@@ -47,6 +48,11 @@ export function notionPageProvider(client: NotionClient): Provider {
         String(spec.desired.summary ?? ""),
       );
       return { externalId: r.id };
+    },
+
+    // Notion's own "delete" is archiving, and it is undoable from the trash.
+    async destroy(_spec, observed) {
+      await client.archivePage(observed.externalId!);
     },
 
     async update(spec, observed) {
@@ -91,6 +97,14 @@ export function mockNotion(world: MockWorld, g: GuardCtx): NotionClient {
         if (p) {
           p.props.summary = summary;
           world.record("notion", "update_page", p.title);
+        }
+      }),
+    archivePage: (id) =>
+      guard(g, "update", K, () => {
+        const p = world.data.notion.pages.find((x) => x.id === id);
+        if (p) {
+          p.archived = true;
+          world.record("notion", "archive_page", p.title);
         }
       }),
   };
@@ -182,6 +196,14 @@ export function liveNotion(token: string, g: GuardCtx): NotionClient {
             }),
           });
         }
+      }),
+
+    archivePage: (id) =>
+      guard(g, "update", K, async () => {
+        await api("/pages/" + id, {
+          method: "PATCH",
+          body: JSON.stringify({ archived: true }),
+        });
       }),
   };
 }

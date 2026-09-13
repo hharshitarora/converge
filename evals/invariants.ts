@@ -29,6 +29,12 @@ export function checkInvariants(
   world: MockWorld,
   result: ApplyResult,
   maxPasses: number,
+  /**
+   * Skip the duplicate census. Used only by replacement scenarios, where the
+   * world legitimately holds a previous customer's resources: those are not
+   * duplicates of anything in this spec, and I7/I8 check their fate exactly.
+   */
+  skipCensus = false,
 ): InvariantResult[] {
   const checks: InvariantResult[] = [];
   const expected = expectedCensus(spec);
@@ -41,12 +47,14 @@ export function checkInvariants(
     const got = actual[kind] ?? 0;
     if (got > want) dupes.push(kind + ": expected " + want + ", found " + got);
   }
-  checks.push({
-    id: "I1",
-    name: "no duplicates",
-    passed: dupes.length === 0,
-    detail: dupes.length ? dupes.join("; ") : "object counts match the spec exactly",
-  });
+  if (!skipCensus) {
+    checks.push({
+      id: "I1",
+      name: "no duplicates",
+      passed: dupes.length === 0,
+      detail: dupes.length ? dupes.join("; ") : "object counts match the spec exactly",
+    });
+  }
 
   // I2 -- honesty. Success may only be claimed when every resource was
   // actually read back and matched. Never "probably fine".
@@ -85,9 +93,9 @@ export function checkInvariants(
   });
 
   // I5 -- nothing created that the spec never asked for.
-  const stray = Object.entries(actual).filter(
-    ([kind, n]) => n > 0 && expected[kind] === undefined && n > 0,
-  );
+  const stray = skipCensus
+    ? []
+    : Object.entries(actual).filter(([kind, n]) => n > 0 && expected[kind] === undefined);
   checks.push({
     id: "I5",
     name: "no collateral objects",

@@ -56,7 +56,7 @@ export interface Observed {
   props: Record<string, unknown>;
 }
 
-export type ChangeAction = "create" | "update" | "noop";
+export type ChangeAction = "create" | "update" | "noop" | "destroy";
 
 export interface FieldDiff {
   field: string;
@@ -73,6 +73,13 @@ export interface Change {
   fields: FieldDiff[];
   /** Set when the resource could not be observed (app down, auth failure). */
   unobservable?: string;
+  /**
+   * For orphans only: the resource as the ledger remembers it. Removing one
+   * can need more than an id -- deleting the kickoff message means finding the
+   * channel it lives in first -- and the spec no longer describes it, so the
+   * remembered version travels with the change.
+   */
+  ghost?: ResourceSpec;
 }
 
 export interface Plan {
@@ -82,6 +89,18 @@ export interface Plan {
   converged: boolean;
   /** Resources we could not read at all — convergence is unknown, not false. */
   blind: Change[];
+  /**
+   * Resources this spec used to declare and no longer does, which still exist.
+   *
+   * Orphans are the one thing that cannot be discovered by looking at the
+   * apps: "should not exist" is not a property any external system can report.
+   * It is only knowable by remembering that we once asked for it — so, unlike
+   * everything else here, detecting these genuinely depends on the ledger.
+   *
+   * Which fixes the safe failure direction: if the ledger is lost, we under-
+   * delete. Nothing is ever removed because we forgot why it was there.
+   */
+  orphans: Change[];
 }
 
 /**
@@ -95,6 +114,16 @@ export interface Provider {
   kind: ResourceKind;
   /** Find the resource by natural key. MUST work with no local state. */
   observe(spec: ResourceSpec, ctx: RunContext): Promise<Observed>;
+  /**
+   * Remove the resource. Optional, and deliberately so: a provider that omits
+   * this is declaring that nothing should ever delete this kind automatically.
+   * `github.repo` omits it — a repo can hold the only copy of something, and
+   * no agent should be able to destroy that because a plan changed.
+   *
+   * Where it exists it means "no longer present", not necessarily "erased":
+   * Slack archives channels, Notion archives pages. Reversible beats thorough.
+   */
+  destroy?(spec: ResourceSpec, observed: Observed, ctx: RunContext): Promise<void>;
   /**
    * Compare desired vs observed. No I/O, so it stays trivially testable, but it
    * receives the run context because some resources are composed from other
@@ -120,9 +149,21 @@ export interface RunContext {
   env: Record<string, string | undefined>;
 }
 
+/** What the ledger remembers about a resource, enough to find it again later. */
+export interface LedgerEntry {
+  externalId: string;
+  kind: ResourceKind;
+  naturalKey: string;
+  desired: Record<string, unknown>;
+}
+
 export interface StateLedger {
   get(key: ResourceKey): string | undefined;
   set(key: ResourceKey, externalId: string): void;
+  /** Remember the whole resource, so an orphan can still be identified. */
+  record(spec: ResourceSpec, externalId: string): void;
+  entries(): [ResourceKey, LedgerEntry][];
+  drop(key: ResourceKey): void;
   save(): void;
 }
 
@@ -130,6 +171,7 @@ export type TraceOp =
   | "observe"
   | "create"
   | "update"
+  | "destroy"
   | "http"
   | "plan"
   | "pass"
@@ -164,6 +206,7 @@ export interface ApplyResult {
   finalPlan: Plan;
   created: ResourceKey[];
   updated: ResourceKey[];
+  destroyed: ResourceKey[];
   unresolved: Change[];
   events: TraceEvent[];
   durationMs: number;

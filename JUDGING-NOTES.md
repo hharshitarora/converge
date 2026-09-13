@@ -43,7 +43,7 @@ property of the whole run, works across every app uniformly, and additionally gi
 drift repair and free re-runs, which idempotency keys don't.
 
 **6. How did you test it?**
-53 generated scenarios with deterministic seeded fault injection, six failure modes
+56 generated scenarios with deterministic seeded fault injection, six failure modes
 across four apps, checked against six invariants — all passing. Plus a baseline: we built
 a conventional retrying agent and ran it through the identical matrix. It left the world
 wrong in 14 of 28 scenarios.
@@ -52,7 +52,7 @@ wrong in 14 of 28 scenarios.
 
 | | |
 |---|---|
-| Scenarios / invariants | **53 / 6**, all passing |
+| Scenarios / invariants | **56 / 8**, all passing |
 | Baseline agent, same faults | **14 of 28** scenarios left the world wrong |
 | Baseline, same job run 3× | **12 duplicate objects** (we produce 0) |
 | Apps integrated | **4** — Slack, Notion, Linear, GitHub |
@@ -75,10 +75,14 @@ template fallback. Note also that `plan` shows a human the full diff before anyt
 touched.
 
 **"Does it delete things?"**
-No, and that's deliberate. The spec says what should exist, never what shouldn't. Drop a
-resource from the spec and it's orphaned rather than removed. We'd rather leave a stray
-channel than delete a real one because of a bad plan. It's a genuine gap, and it's listed
-in the limitations.
+Only if you ask. Orphans - things the spec used to declare and no longer does - are always
+*reported*, but removed only under `--prune`. This is the one place the ledger genuinely
+matters: "should no longer exist" isn't something any app can tell you, it's only knowable
+by remembering we once asked for it. That sets the failure direction - lose the ledger and
+we under-delete, never over-delete. GitHub repos are never deleted automatically at all:
+that provider implements no destroy method, which is a stronger guarantee than a flag,
+because there's no code path to reach by accident. Slack and Notion archive rather than
+erase.
 
 **"What if two people run it at once?"**
 Both could observe "absent" before either creates. Natural keys mean the app usually
@@ -91,16 +95,18 @@ one workflow. We deliberately picked a boring, legible workflow so the execution
 was the interesting part rather than the domain.
 
 **"Did the tests actually find anything?"**
-Three real bugs, all in the README. An infinite create loop when a Slack channel was
+Four real bugs, all in the README. An infinite create loop when a Slack channel was
 archived (it still owns the name, so the create could never succeed), and a frozen pass
 counter that made "fail only on pass 1" mean "fail on every pass". And a duplicated Slack
 message: planning read every resource at once, but the message is found by searching its
 channel, so it needs the channel's id first — with an empty ledger it was looked up too
-early, reported absent, and posted twice. Reads now run in dependency layers. None of the
-three was found by reading the code.
+early, reported absent, and posted twice. Reads now run in dependency layers. Notably two
+of the four were bugs in the *twins* rather than the system - an over-lenient test double
+certifies real bugs as safe, so the twins were fixed to match what the real APIs do. None
+of the four was found by reading the code.
 
 ## What to say if asked what you'd do next
 
-Deletion with an explicit approval gate; leases for concurrent runs; and a continuous
+An interactive confirmation gate on `--prune`; leases for concurrent runs; and a continuous
 drift watcher — the plan function already does the work, it just needs a scheduler, so
 onboarding stays correct a month later rather than only at the moment it ran.

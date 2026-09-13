@@ -99,7 +99,80 @@ async function runScenario(sc: Scenario): Promise<ScenarioOutcome> {
     lastResult = await apply(s, registry.providers, ctx, { maxPasses: MAX_PASSES });
   }
 
-  const checks = checkInvariants(s, world, lastResult, MAX_PASSES);
+  // A replacement scenario converges a DIFFERENT customer over the first one.
+  // Everything is then judged against the second spec: the first customer's
+  // resources should be gone under --prune, and untouched without it.
+  let judgedSpec = s;
+  if (sc.replaceWith) {
+    judgedSpec = templateSpec({
+      company: sc.replaceWith,
+      tier: "Standard",
+      notionParentId: "mock-parent",
+      linearTeamKey: "ENG",
+    });
+    const ctx: RunContext = {
+      runId: "eval_replace_" + sc.seed,
+      pass: 1,
+      state,
+      env: {},
+      trace: (e) => events.push({ ...e, ts: Date.now(), runId: "eval", pass: 0 } as TraceEvent),
+    };
+    const g = {
+      injector: new FaultInjector(sc.faults, sc.seed),
+      pass: () => ctx.pass,
+    };
+    const registry = buildRegistry({}, g, world);
+    lastResult = await apply(judgedSpec, registry.providers, ctx, {
+      maxPasses: MAX_PASSES,
+      prune: sc.prune,
+    });
+  }
+
+  const checks = checkInvariants(judgedSpec, world, lastResult, MAX_PASSES, !!sc.replaceWith);
+
+  if (sc.replaceWith) {
+    // Slack channels and Notion pages are archived rather than erased, so
+    // count only what is still live; Linear issues and messages really go.
+    const liveChannels = world.data.slack.channels.filter((c) => !c.archived).length;
+    const livePages = world.data.notion.pages.filter((p) => !p.archived).length;
+    const issues = world.data.linear.issues.length;
+    const messages = world.data.slack.messages.length;
+    const repos = world.data.github.repos.length;
+
+    if (sc.prune) {
+      const clean =
+        liveChannels === 1 && livePages === 1 && issues === 3 && messages === 1;
+      checks.push({
+        id: "I7",
+        name: "replaced customer removed",
+        passed: clean,
+        detail: clean
+          ? "only the current customer remains; repos deliberately kept (" + repos + ")"
+          : "leftovers: channels=" + liveChannels + " pages=" + livePages +
+            " issues=" + issues + " messages=" + messages,
+      });
+      checks.push({
+        id: "I8",
+        name: "never deletes a repo",
+        passed: repos === 2,
+        detail: repos === 2
+          ? "both repos intact -- github.repo implements no destroy()"
+          : "A REPO WAS DELETED",
+      });
+    } else {
+      const untouched =
+        liveChannels === 2 && livePages === 2 && issues === 6 && messages === 2;
+      checks.push({
+        id: "I7",
+        name: "nothing deleted without --prune",
+        passed: untouched,
+        detail: untouched
+          ? "both customers intact; the default run has no delete path"
+          : "SOMETHING WAS REMOVED WITHOUT BEING ASKED: channels=" + liveChannels +
+            " pages=" + livePages + " issues=" + issues + " messages=" + messages,
+      });
+    }
+  }
 
   // A scenario that is expected to end blind must NOT claim convergence, but
   // must still satisfy every other invariant.

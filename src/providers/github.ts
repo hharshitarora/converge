@@ -22,6 +22,15 @@ export interface GithubRepoView {
 
 const FIELDS = ["description"];
 
+/**
+ * Note what this provider does NOT implement: `destroy`.
+ *
+ * Deleting a GitHub repo is irreversible and can take the only copy of
+ * someone's work with it. No plan change is worth that risk, so the capability
+ * simply does not exist here -- an orphaned repo is reported for a human to
+ * deal with. Omitting the method is a stronger guarantee than a flag guarding
+ * it, because there is no code path to reach even by mistake.
+ */
 export function githubRepoProvider(client: GithubClient): Provider {
   return {
     kind: "github.repo",

@@ -4,6 +4,7 @@ import type {
   Plan,
   Provider,
   ResourceKind,
+  ResourceSpec,
   RunContext,
   Spec,
   TraceEvent,
@@ -44,6 +45,11 @@ export interface ApplyOptions {
   maxPasses?: number;
   /** Plan only; make no changes. */
   dryRun?: boolean;
+  /**
+   * Remove resources the spec no longer declares. Opt-in, always: the default
+   * run has no path that deletes anything, so a bad plan cannot cost you data.
+   */
+  prune?: boolean;
 }
 
 export async function apply(
@@ -57,6 +63,7 @@ export async function apply(
   const events: TraceEvent[] = [];
   const created: string[] = [];
   const updated: string[] = [];
+  const destroyed: string[] = [];
 
   // Capture every traced event for the run report.
   //
@@ -71,7 +78,7 @@ export async function apply(
   };
   const ctxWithCapture: RunContext = ctx;
 
-  let plan: Plan = { goal: spec.goal, changes: [], blind: [], converged: false };
+  let plan: Plan = { goal: spec.goal, changes: [], blind: [], orphans: [], converged: false };
   let initialPlan: Plan | undefined;
   let pass = 0;
 
@@ -82,7 +89,7 @@ export async function apply(
     // Every pass starts by reading reality. On pass 1 this is the plan; on
     // every later pass it is simultaneously the verification of the pass
     // before it and the plan for this one.
-    plan = await buildPlan(spec, providers, ctxWithCapture);
+    plan = await buildPlan(spec, providers, ctxWithCapture, { exact: opts.prune });
     // Pass 1's plan is the statement of intent -- what a human would approve.
     // Later passes are verification, and converge toward empty.
     if (!initialPlan) initialPlan = plan;
@@ -108,12 +115,18 @@ export async function apply(
 
     // Nothing actionable left: only blind spots remain. More passes cannot
     // help, so stop rather than spin.
-    if (plan.changes.length === 0) break;
+    const prunable = opts.prune ? plan.orphans.filter((o) => !o.unobservable) : [];
+    if (plan.changes.length === 0 && prunable.length === 0) break;
 
     for (const change of topoSort(plan.changes, spec)) {
       const done = await executeOnce(change, spec, providers, ctxWithCapture);
       if (done === "created") created.push(change.key);
       if (done === "updated") updated.push(change.key);
+    }
+
+    // Dependents first: a message must go before the channel that holds it.
+    for (const orphan of [...prunable].reverse()) {
+      if (await destroyOnce(orphan, providers, ctxWithCapture)) destroyed.push(orphan.key);
     }
 
     await sleep(25);
@@ -130,10 +143,76 @@ export async function apply(
     finalPlan: plan,
     created: [...new Set(created)],
     updated: [...new Set(updated)],
+    destroyed: [...new Set(destroyed)],
     unresolved: [...plan.changes, ...plan.blind],
     events,
     durationMs: Date.now() - started,
   };
+}
+
+/**
+ * Remove one orphan. Attempted once, like every other write, for the same
+ * reason: a failed delete is as ambiguous as a failed create, and a blind
+ * retry on a delete is worse than one on a create. The next pass re-observes;
+ * if it is gone, there is nothing left to plan.
+ */
+async function destroyOnce(
+  orphan: Change,
+  providers: Map<ResourceKind, Provider>,
+  ctx: RunContext,
+): Promise<boolean> {
+  const provider = providers.get(orphan.kind);
+  // No destroy() means this kind is never removed automatically. That is a
+  // deliberate refusal, so report it as work for a human, not as a failure.
+  if (!provider?.destroy) {
+    ctx.trace({
+      op: "destroy",
+      key: orphan.key,
+      kind: orphan.kind,
+      ok: true,
+      detail: "left in place: " + orphan.kind + " is never deleted automatically",
+    });
+    return false;
+  }
+
+  const ghost: ResourceSpec = orphan.ghost ?? {
+    key: orphan.key,
+    kind: orphan.kind,
+    naturalKey: orphan.naturalKey,
+    desired: {},
+  };
+  const t0 = Date.now();
+  try {
+    await provider.destroy(
+      ghost,
+      { exists: true, externalId: orphan.externalId, props: {} },
+      ctx,
+    );
+    ctx.state.drop(orphan.key);
+    ctx.trace({
+      op: "destroy",
+      key: orphan.key,
+      kind: orphan.kind,
+      attempt: 1,
+      latencyMs: Date.now() - t0,
+      ok: true,
+      detail: "removed " + orphan.naturalKey,
+    });
+    return true;
+  } catch (e) {
+    ctx.trace({
+      op: "destroy",
+      key: orphan.key,
+      kind: orphan.kind,
+      attempt: 1,
+      latencyMs: Date.now() - t0,
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      fault: e instanceof FaultInjected ? e.mode : undefined,
+      detail: "not retried in-pass by design",
+    });
+    return false;
+  }
 }
 
 /**
@@ -152,7 +231,7 @@ async function executeOnce(
   try {
     if (change.action === "create") {
       const { externalId } = await provider.create(resource, ctx);
-      ctx.state.set(change.key, externalId);
+      ctx.state.record(resource, externalId);
       ctx.trace({
         op: "create",
         key: change.key,

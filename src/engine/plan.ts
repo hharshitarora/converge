@@ -24,10 +24,27 @@ import { FaultInjected, FaultInjector } from "../faults.js";
 
 const OBSERVE_ATTEMPTS = 3;
 
+export interface PlanOptions {
+  /**
+   * Treat the spec as the COMPLETE desired state, so leftovers count as work.
+   *
+   * Two honest readings of "converged" exist, and which one applies is the
+   * caller's decision, not ours:
+   *   additive (default) - the spec says what must exist; a leftover is untidy
+   *   exact (--prune)    - the spec says what must exist AND ONLY THAT
+   *
+   * Keeping both inside this one function matters: convergence, verification
+   * and drift stay a single predicate, and the prune flag changes what that
+   * predicate means rather than bolting a second notion of done onto the loop.
+   */
+  exact?: boolean;
+}
+
 export async function buildPlan(
   spec: Spec,
   providers: Map<ResourceKind, Provider>,
   ctx: RunContext,
+  opts: PlanOptions = {},
 ): Promise<Plan> {
   // Observe in dependency layers, concurrently within each layer.
   //
@@ -47,6 +64,7 @@ export async function buildPlan(
 
   const changes = results.filter((c) => c.action !== "noop" && !c.unobservable);
   const blind = results.filter((c) => !!c.unobservable);
+  const orphans = await findOrphans(spec, providers, ctx);
 
   ctx.trace({
     op: "plan",
@@ -66,10 +84,72 @@ export async function buildPlan(
     goal: spec.goal,
     changes,
     blind,
+    orphans,
     // Convergence requires certainty. A resource we could not read is not
     // "fine by default" -- we refuse to claim success over a blind spot.
-    converged: changes.length === 0 && blind.length === 0,
+    //
+    // Orphans block convergence only in exact mode. Note the exclusion of
+    // orphans a provider refuses to delete: those can never be resolved by
+    // this system, so counting them would mean --prune could never converge
+    // and would spin to the pass limit every time. They are reported for a
+    // human instead, which is the only honest outcome.
+    converged:
+      changes.length === 0 &&
+      blind.length === 0 &&
+      (!opts.exact || orphans.every((o) => !!o.unobservable)),
   };
+}
+
+/**
+ * Resources the ledger remembers but the spec no longer declares, which still
+ * exist in their app. See the note on `Plan.orphans`: this is the one question
+ * the external apps cannot answer for us.
+ */
+async function findOrphans(
+  spec: Spec,
+  providers: Map<ResourceKind, Provider>,
+  ctx: RunContext,
+): Promise<Change[]> {
+  const declared = new Set(spec.resources.map((r) => r.key));
+  const out: Change[] = [];
+
+  for (const [key, entry] of ctx.state.entries()) {
+    if (declared.has(key)) continue;
+    const provider = providers.get(entry.kind);
+    if (!provider) continue;
+
+    // Rebuild just enough of the departed resource to look it up again.
+    const ghost: ResourceSpec = {
+      key,
+      kind: entry.kind,
+      naturalKey: entry.naturalKey,
+      desired: entry.desired,
+    };
+
+    try {
+      const observed = await provider.observe(ghost, ctx);
+      if (!observed.exists) {
+        // Already gone; stop remembering it.
+        ctx.state.drop(key);
+        continue;
+      }
+      out.push({
+        key,
+        kind: entry.kind,
+        naturalKey: entry.naturalKey,
+        action: "destroy",
+        externalId: observed.externalId,
+        fields: [],
+        ghost,
+        // A provider with no destroy() is refusing on principle, not failing.
+        unobservable: provider.destroy ? undefined : "this kind is never deleted automatically",
+      });
+    } catch {
+      // If we cannot confirm it still exists, we certainly will not delete it.
+    }
+  }
+
+  return out;
 }
 
 async function observeOne(
@@ -104,7 +184,7 @@ async function observeOne(
         ok: true,
         detail: observed.exists ? "found " + (observed.externalId ?? "") : "absent",
       });
-      if (observed.externalId) ctx.state.set(spec.key, observed.externalId);
+      if (observed.externalId) ctx.state.record(spec, observed.externalId);
       return {
         key: spec.key,
         kind: spec.kind,

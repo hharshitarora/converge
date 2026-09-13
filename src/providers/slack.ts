@@ -17,6 +17,7 @@ export interface SlackClient {
   setTopic(id: string, topic: string): Promise<void>;
   setPurpose(id: string, purpose: string): Promise<void>;
   unarchive(id: string): Promise<void>;
+  archive(id: string): Promise<void>;
 }
 
 export interface SlackChannelView {
@@ -64,6 +65,12 @@ export function slackChannelProvider(client: SlackClient): Provider {
       if (spec.desired.purpose)
         await client.setPurpose(id, String(spec.desired.purpose));
       return { externalId: id };
+    },
+
+    // Archive, never delete: Slack itself offers no channel deletion, and the
+    // history stays readable. Reversible beats thorough.
+    async destroy(_spec, observed) {
+      await client.archive(observed.externalId!);
     },
 
     async update(spec, observed, fields) {
@@ -127,6 +134,14 @@ export function mockSlack(world: MockWorld, g: GuardCtx): SlackClient {
         if (c) {
           c.archived = false;
           world.record("slack", "unarchive", c.name);
+        }
+      }),
+    archive: (id) =>
+      guard(g, "update", K, () => {
+        const c = world.data.slack.channels.find((x) => x.id === id);
+        if (c) {
+          c.archived = true;
+          world.record("slack", "archive", c.name);
         }
       }),
   };
@@ -205,6 +220,10 @@ export function liveSlack(token: string, g: GuardCtx): SlackClient {
     unarchive: (channel) =>
       guard(g, "update", K, async () => {
         await call("conversations.unarchive", { channel });
+      }),
+    archive: (channel) =>
+      guard(g, "update", K, async () => {
+        await call("conversations.archive", { channel });
       }),
   };
 }

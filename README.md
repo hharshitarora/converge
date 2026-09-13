@@ -93,6 +93,20 @@ then run it again — it repairs exactly those three and touches nothing else.
    read, that resource is reported *blind* and the run refuses to claim convergence.
    Silence is never treated as success.
 
+6. **Deleting is opt-in, and deliberately the one thing the ledger is needed for.**
+   "This should no longer exist" is not a fact any app can report - you cannot look at
+   Slack and discover a channel is unwanted. It is only knowable by remembering we once
+   asked for it. So orphans are reported by default and removed only under `--prune`,
+   which also changes what convergence *means*: additive by default (the spec says what
+   must exist), exact under `--prune` (what must exist, and only that). Both readings
+   live in the same predicate rather than as a second notion of done.
+
+   That asymmetry sets the failure direction. A lost ledger means we **under**-delete;
+   it can never mean we delete something we can no longer prove we created. And
+   `github.repo` implements no `destroy()` at all - a repo can hold the only copy of
+   something, so an orphaned one is reported for a human. Omitting the method is a
+   stronger guarantee than a flag guarding it: there is no code path to reach by mistake.
+
 ## External apps used
 
 Four, all with real API integrations:
@@ -198,7 +212,7 @@ whichever tokens you have in `.env`:
 
 ## How reliability was tested
 
-`npm run eval` runs **53 scenarios** against the twins with **deterministic, seeded**
+`npm run eval` runs **56 scenarios** against the twins with **deterministic, seeded**
 fault injection — every failure is exactly reproducible. Coverage is generated as a
 matrix rather than hand-written, so it doesn't depend on the author's patience.
 
@@ -212,22 +226,29 @@ matrix rather than hand-written, so it doesn't depend on the author's patience.
 - `rate_limit`, `error_500`, `timeout` — loud failures.
 - `auth_fail` — unrecoverable within a run; the correct behaviour is to stay blind.
 
-**Seven scenario families:** happy path · idempotence (applied three times) · write
+**Eight scenario families:** happy path · idempotence (applied three times) · write
 faults (every mode × every app) · read faults · unrecoverable auth failure · chaos (two
 apps failing at once) · state independence (ledger deleted mid-sequence) · drift repair
-(damage done outside the agent).
+(damage done outside the agent) - pruning (a replaced customer, with and without
+`--prune`, and a delete that fails mid-run).
 
-**Six invariants**, each phrased as something a user would notice — not as "was retry
+**Eight invariants**, each phrased as something a user would notice — not as "was retry
 called twice", which passes happily while the world is corrupt:
 
 | ID | Invariant | Result |
 |---|---|---|
 | I1 | no duplicates | **53/53** |
-| I2 | no false success | **53/53** |
-| I3 | no half-written state | **53/53** |
-| I4 | bounded passes | **53/53** |
-| I5 | no collateral objects | **53/53** |
-| I6 | reached desired state, or said plainly that it couldn't | **53/53** |
+| I2 | no false success | **56/56** |
+| I3 | no half-written state | **56/56** |
+| I4 | bounded passes | **56/56** |
+| I5 | no collateral objects | **56/56** |
+| I6 | reached desired state, or said plainly that it couldn't | **56/56** |
+| I7 | a replaced customer is removed - and nothing removed without `--prune` | **3/3** |
+| I8 | never deletes a repo | **2/2** |
+
+I1 and I5 are scoped to the 53 single-spec scenarios: in a replacement scenario the extra
+objects belong to a *former* customer and are not duplicates of anything in the current
+spec, so I7 and I8 check their fate exactly instead.
 
 ### The baseline comparison
 
@@ -261,7 +282,16 @@ Both were found by the evals during the build, not by us reading the code:
    actually meant "fail on every pass". Single-fault scenarios masked it; the chaos
    family exposed it.
 
-3. **A duplicated Slack message.** Planning observed every resource concurrently, which
+3. **Ids recycled by our own test double.** The twins minted ids from a module-level
+   counter that reset every process, while the world itself persisted to disk - so a
+   second CLI run issued `C_0001` again and collided with an existing channel. Writes
+   landed on whichever record matched first, and convergence looped forever updating a
+   field on the wrong object. Real services never recycle ids, so a twin that does is not
+   a simpler model of one, it is a wrong one. The counter now lives with the world. This
+   is the second bug found *in the twins rather than in the system*, which is its own
+   argument for keeping a test double honest.
+
+4. **A duplicated Slack message.** Planning observed every resource concurrently, which
    looked harmless and was faster. But the kickoff message can only be *found* by
    searching the channel it lives in, so it needs the channel's id first. With an empty
    ledger, the message was looked up before the channel had been rediscovered, reported
