@@ -48,7 +48,7 @@ export function slackChannelProvider(client: SlackClient): Provider {
       };
     },
 
-    diff(spec, observed) {
+    diff(spec, observed, _ctx) {
       const fields = diffProps(spec, observed, FIELDS);
       // `archived: false` is an implicit part of every channel's desired
       // state; no spec should have to remember to say so.

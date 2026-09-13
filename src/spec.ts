@@ -15,6 +15,7 @@ import { slug } from "./providers/support.js";
 
 export const KINDS = [
   "slack.channel",
+  "slack.message",
   "notion.page",
   "linear.issue",
   "github.repo",
@@ -61,6 +62,9 @@ export function validateSpec(spec: Spec): ValidationIssue[] {
     }
     if (r.kind === "linear.issue" && !r.desired.teamKey) {
       issues.push("linear.issue " + r.key + " is missing desired.teamKey");
+    }
+    if (r.kind === "slack.message" && !r.desired.channelKey) {
+      issues.push("slack.message " + r.key + " is missing desired.channelKey");
     }
   }
 
@@ -181,6 +185,34 @@ export function templateSpec(opts: {
         desired: {
           description: "Integration workspace for " + company + " (" + tier + " tier).",
         },
+      },
+      {
+        // Composed from what every other app returned. `{{key}}` resolves to
+        // that resource's real external id, so this message cannot be written
+        // until Notion, Linear and GitHub have each produced one.
+        key: "slack.message:kickoff:" + s,
+        kind: "slack.message",
+        naturalKey: "kickoff brief for " + company,
+        desired: {
+          channelKey: "slack.channel:" + s,
+          text: [
+            ":wave: *" + company + "* is onboarding (" + tier + " tier). " +
+              "Account owner: " + owner + ".",
+            "- Account record: {{notion.page:" + s + "}}",
+            "- Onboarding epic: {{linear.epic:" + s + "}}",
+            "- Kickoff call: {{linear.task:kickoff:" + s + "}}",
+            "- Production access: {{linear.task:access:" + s + "}}",
+            "- Integration repo: {{github.repo:" + s + "}}",
+          ].join("\n"),
+        },
+        dependsOn: [
+          "slack.channel:" + s,
+          "notion.page:" + s,
+          "linear.epic:" + s,
+          "linear.task:kickoff:" + s,
+          "linear.task:access:" + s,
+          "github.repo:" + s,
+        ],
       },
     ],
   };

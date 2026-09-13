@@ -36,7 +36,7 @@ export function githubRepoProvider(client: GithubClient): Provider {
       };
     },
 
-    diff(spec, observed) {
+    diff(spec, observed, _ctx) {
       return diffProps(spec, observed, FIELDS);
     },
 

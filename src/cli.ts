@@ -42,10 +42,11 @@ function loadEnv() {
 }
 
 const APP_LABEL: Record<string, string> = {
-  "slack.channel": "Slack   ",
-  "notion.page": "Notion  ",
-  "linear.issue": "Linear  ",
-  "github.repo": "GitHub  ",
+  "slack.channel": "Slack ch  ",
+  "slack.message": "Slack msg ",
+  "notion.page": "Notion    ",
+  "linear.issue": "Linear    ",
+  "github.repo": "GitHub    ",
 };
 
 function renderPlan(plan: Plan, spec: Spec) {

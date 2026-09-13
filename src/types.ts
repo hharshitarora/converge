@@ -95,8 +95,13 @@ export interface Provider {
   kind: ResourceKind;
   /** Find the resource by natural key. MUST work with no local state. */
   observe(spec: ResourceSpec, ctx: RunContext): Promise<Observed>;
-  /** Compare desired vs observed. Pure — no I/O, so it is trivially testable. */
-  diff(spec: ResourceSpec, observed: Observed): FieldDiff[];
+  /**
+   * Compare desired vs observed. No I/O, so it stays trivially testable, but it
+   * receives the run context because some resources are composed from other
+   * resources' results — a kickoff message quoting the Linear issue ids can
+   * only be diffed once those ids are known.
+   */
+  diff(spec: ResourceSpec, observed: Observed, ctx: RunContext): FieldDiff[];
   create(spec: ResourceSpec, ctx: RunContext): Promise<{ externalId: string }>;
   update(
     spec: ResourceSpec,

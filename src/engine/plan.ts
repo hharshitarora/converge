@@ -29,9 +29,21 @@ export async function buildPlan(
   providers: Map<ResourceKind, Provider>,
   ctx: RunContext,
 ): Promise<Plan> {
-  const results = await Promise.all(
-    spec.resources.map((r) => observeOne(r, providers, ctx)),
-  );
+  // Observe in dependency layers, concurrently within each layer.
+  //
+  // Not merely an optimisation detail: some resources can only be FOUND
+  // through another resource's identity. A Slack message has no name, so it is
+  // located by searching the channel it lives in — which means the channel's
+  // id must already be known. Observing everything at once looked harmless and
+  // was faster, but with an empty ledger the message was looked up before its
+  // channel had been rediscovered, reported absent, and got posted a second
+  // time. Dependencies constrain reads exactly as they constrain writes.
+  const results: Change[] = [];
+  for (const layer of dependencyLayers(spec)) {
+    results.push(
+      ...(await Promise.all(layer.map((r) => observeOne(r, providers, ctx)))),
+    );
+  }
 
   const changes = results.filter((c) => c.action !== "noop" && !c.unobservable);
   const blind = results.filter((c) => !!c.unobservable);
@@ -82,7 +94,7 @@ async function observeOne(
     const t0 = Date.now();
     try {
       const observed = await provider.observe(spec, ctx);
-      const fields = provider.diff(spec, observed);
+      const fields = provider.diff(spec, observed, ctx);
       ctx.trace({
         op: "observe",
         key: spec.key,
@@ -130,6 +142,37 @@ async function observeOne(
     fields: [],
     unobservable: lastErr,
   };
+}
+
+/**
+ * Group resources so that everything in layer N depends only on layers < N.
+ * Members of a layer are independent of one another and can run concurrently.
+ */
+export function dependencyLayers(spec: Spec): ResourceSpec[][] {
+  const byKey = new Map(spec.resources.map((r) => [r.key, r]));
+  const depth = new Map<string, number>();
+
+  const compute = (key: string, seen: Set<string>): number => {
+    if (depth.has(key)) return depth.get(key)!;
+    // A cycle is rejected by spec validation before we get here; guard anyway
+    // so a malformed spec cannot hang the planner.
+    if (seen.has(key)) return 0;
+    seen.add(key);
+    const deps = (byKey.get(key)?.dependsOn ?? []).filter((d) => byKey.has(d));
+    const d = deps.length ? 1 + Math.max(...deps.map((x) => compute(x, seen))) : 0;
+    seen.delete(key);
+    depth.set(key, d);
+    return d;
+  };
+
+  for (const r of spec.resources) compute(r.key, new Set());
+
+  const layers: ResourceSpec[][] = [];
+  for (const r of spec.resources) {
+    const d = depth.get(r.key) ?? 0;
+    (layers[d] ??= []).push(r);
+  }
+  return layers.filter(Boolean);
 }
 
 /** Order changes so dependencies land before dependents. */

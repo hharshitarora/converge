@@ -48,7 +48,7 @@ export function linearIssueProvider(client: LinearClient): Provider {
       };
     },
 
-    diff(spec, observed) {
+    diff(spec, observed, _ctx) {
       return diffProps(spec, observed, FIELDS);
     },
 

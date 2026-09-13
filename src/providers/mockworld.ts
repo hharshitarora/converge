@@ -120,6 +120,18 @@ export class MockWorld {
     return ch;
   }
 
+  findMessage(channelId: string, marker: string) {
+    return this.data.slack.messages.find(
+      (m) => m.channelId === channelId && m.text.includes(marker),
+    );
+  }
+  createMessage(channelId: string, text: string): SlackMessage {
+    const m: SlackMessage = { id: mockId("msg"), channelId, text };
+    this.data.slack.messages.push(m);
+    this.record("slack", "post_message", channelId);
+    return m;
+  }
+
   // --- Notion ------------------------------------------------------------
   findPage(parentId: string, title: string) {
     return this.data.notion.pages.find(
@@ -187,6 +199,7 @@ export class MockWorld {
   census(): Record<string, number> {
     return {
       "slack.channel": this.data.slack.channels.length,
+      "slack.message": this.data.slack.messages.length,
       "notion.page": this.data.notion.pages.filter((p) => !p.archived).length,
       "linear.issue": this.data.linear.issues.length,
       "github.repo": this.data.github.repos.length,

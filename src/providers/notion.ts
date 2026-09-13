@@ -36,7 +36,7 @@ export function notionPageProvider(client: NotionClient): Provider {
       return { exists: true, externalId: pg.id, props: { summary: pg.summary } };
     },
 
-    diff(spec, observed) {
+    diff(spec, observed, _ctx) {
       return diffProps(spec, observed, FIELDS);
     },
 

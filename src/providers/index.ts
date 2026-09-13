@@ -5,6 +5,7 @@ import { slackChannelProvider, mockSlack, liveSlack } from "./slack.js";
 import { notionPageProvider, mockNotion, liveNotion } from "./notion.js";
 import { linearIssueProvider, mockLinear, liveLinear } from "./linear.js";
 import { githubRepoProvider, mockGithub, liveGithub } from "./github.js";
+import { slackMessageProvider, mockSlackMessage, liveSlackMessage } from "./slackmessage.js";
 
 export { MockWorld } from "./mockworld.js";
 
@@ -35,9 +36,11 @@ export function buildRegistry(
   const slackTok = env.SLACK_BOT_TOKEN;
   if (live && slackTok) {
     providers.set("slack.channel", slackChannelProvider(liveSlack(slackTok, g)));
+    providers.set("slack.message", slackMessageProvider(liveSlackMessage(slackTok, g)));
     modes.slack = "live";
   } else {
     providers.set("slack.channel", slackChannelProvider(mockSlack(world, g)));
+    providers.set("slack.message", slackMessageProvider(mockSlackMessage(world, g)));
     modes.slack = "mock";
   }
 

@@ -102,6 +102,25 @@ Four, all with real API integrations:
 | **Notion** | account record page (+ body) | title under parent page | REST v1 |
 | **Linear** | onboarding epic + sub-issues | title within team | GraphQL |
 | **GitHub** | integration repo | repo name under owner | REST via `gh` |
+| **Slack** | kickoff brief message | invisible marker in the text | Web API |
+
+These are one workflow, not four parallel integrations. The final Slack message is
+**composed from what the other apps returned** — its template carries `{{resource.key}}`
+placeholders that resolve to the real Notion page id, the real Linear issue ids and the
+real repo, so it cannot be written until those exist:
+
+```
+:wave: *Acme Corp* is onboarding (Pro tier). Account owner: dana@ourco.com.
+- Account record: {{notion.page:acme-corp}}      ->  page_0002
+- Onboarding epic: {{linear.epic:acme-corp}}     ->  iss_0003
+- Kickoff call: {{linear.task:kickoff:acme-corp}} ->  iss_0004
+- Integration repo: {{github.repo:acme-corp}}    ->  repo_0006
+```
+
+That message also poses the most interesting identity question in the project: a Slack
+message has no name, so what is its natural key? We embed a zero-width marker derived
+from the resource key and search the channel for it. Post it twice and the second run
+finds the first rather than duplicating it.
 
 Each app resolves to live or twin **independently**, based on whether its credential is
 present — so if one token expires mid-demo, the other three still run for real.
@@ -227,6 +246,14 @@ Both were found by the evals during the build, not by us reading the code:
    actually meant "fail on every pass". Single-fault scenarios masked it; the chaos
    family exposed it.
 
+3. **A duplicated Slack message.** Planning observed every resource concurrently, which
+   looked harmless and was faster. But the kickoff message can only be *found* by
+   searching the channel it lives in, so it needs the channel's id first. With an empty
+   ledger, the message was looked up before the channel had been rediscovered, reported
+   absent, and was posted twice. Dependencies constrain reads exactly as they constrain
+   writes; observation now runs in dependency layers, concurrent within each layer. Only
+   the state-loss scenarios caught this.
+
 ## Known limitations
 
 - **No deletion.** The spec describes what should exist, never what should not. A
@@ -269,6 +296,7 @@ src/
     state.ts          the ledger (a cache, deliberately not the source of truth)
   providers/
     slack|notion|linear|github.ts   one file per app: client interface, twin, live, provider
+    slackmessage.ts   the cross-app resource, composed from the others' results
     mockworld.ts      persistent in-memory twins of all four apps
 evals/
   scenarios.ts        the generated 53-scenario matrix
