@@ -4,7 +4,7 @@
 
 Built for the Multi-App AI Agent Hackathon, 13 September 2026.
 
-**Demo video:** _(link added before submission)_
+**Demo video:** https://www.loom.com/share/c49895c6b33b49a68bf15251848f9d3b
 
 ---
 
