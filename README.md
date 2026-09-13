@@ -291,7 +291,15 @@ Both were found by the evals during the build, not by us reading the code:
    is the second bug found *in the twins rather than in the system*, which is its own
    argument for keeping a test double honest.
 
-4. **A duplicated Slack message.** Planning observed every resource concurrently, which
+4. **Four duplicate Notion pages, against the real API.** The exact failure this project
+   exists to prevent, found only once real credentials were in play. Notion's search is
+   eventually consistent, so `observe` reported "absent" about a page created seconds
+   earlier and every pass created another. The twins were strongly consistent, so all 56
+   scenarios passed over it. Fixed by looking up through the parent's child listing, which
+   is strongly consistent - and by writing the assumption down, since the guarantee had
+   been resting on it unstated.
+
+5. **A duplicated Slack message.** Planning observed every resource concurrently, which
    looked harmless and was faster. But the kickoff message can only be *found* by
    searching the channel it lives in, so it needs the channel's id first. With an empty
    ledger, the message was looked up before the channel had been rediscovered, reported
@@ -300,6 +308,12 @@ Both were found by the evals during the build, not by us reading the code:
    the state-loss scenarios caught this.
 
 ## Known limitations
+
+- **Eventually-consistent lookups would break the guarantee.** Idempotency rests on
+  finding a resource by natural key immediately after writing it. Each provider uses a
+  strongly consistent read today, but adding an app whose lookup is eventually consistent
+  would silently reintroduce duplicates, and our twins - being strongly consistent - would
+  not catch it. A `stale_read` fault mode belongs in the matrix and is not there yet.
 
 - **No deletion.** The spec describes what should exist, never what should not. A
   resource removed from the spec is orphaned rather than cleaned up. Convergence is

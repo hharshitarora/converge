@@ -95,7 +95,14 @@ one workflow. We deliberately picked a boring, legible workflow so the execution
 was the interesting part rather than the domain.
 
 **"Did the tests actually find anything?"**
-Four real bugs, all in the README. An infinite create loop when a Slack channel was
+Five real bugs, all in the README - and the most important one the tests did NOT find.
+Running against real Notion produced four duplicate pages, because Notion's search is
+eventually consistent: a page created seconds ago isn't indexed, so every pass saw
+"absent" and created another. Our twins were strongly consistent, so all 56 scenarios
+sailed past it. The guarantee had been resting on an unstated assumption - that
+natural-key lookup is read-after-write consistent. It's now stated, and every provider
+uses a strongly consistent read. That's the honest headline: the eval suite is only as
+good as the fidelity of its twins. An infinite create loop when a Slack channel was
 archived (it still owns the name, so the create could never succeed), and a frozen pass
 counter that made "fail only on pass 1" mean "fail on every pass". And a duplicated Slack
 message: planning read every resource at once, but the message is found by searching its

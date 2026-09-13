@@ -141,19 +141,35 @@ export function liveNotion(token: string, g: GuardCtx): NotionClient {
   return {
     findPage: (parentId, title) =>
       guard(g, "observe", K, async () => {
-        const r = (await api("/search", {
-          method: "POST",
-          body: JSON.stringify({
-            query: title,
-            filter: { property: "object", value: "page" },
-            page_size: 50,
-          }),
-        })) as { results: any[] };
-        const hit = r.results.find((p) => {
-          const t = p.properties?.title?.title?.[0]?.plain_text ?? "";
-          const parent = p.parent?.page_id ? norm(p.parent.page_id) : "";
-          return t === title && parent === norm(parentId);
-        });
+        /**
+         * Listing the parent's children, NOT /v1/search.
+         *
+         * Search is eventually consistent: a page created seconds ago is not
+         * indexed yet, so a search-based lookup answers "absent" about a page
+         * that definitely exists. Under convergence that is catastrophic --
+         * every pass re-creates, and a run against real Notion produced four
+         * identical pages before the pass limit stopped it.
+         *
+         * The whole no-duplicate guarantee rests on an assumption that was
+         * never written down: that finding a resource by natural key is
+         * read-after-write consistent. Child listing is; search is not.
+         */
+        let cursor = "";
+        let hit: { id: string; archived?: boolean } | undefined;
+        for (let page = 0; page < 20 && !hit; page++) {
+          const q = cursor ? "&start_cursor=" + cursor : "";
+          const r = (await api(
+            "/blocks/" + norm(parentId) + "/children?page_size=100" + q,
+            { method: "GET" },
+          )) as { results: any[]; next_cursor?: string; has_more?: boolean };
+
+          hit = r.results.find(
+            (b) => b.type === "child_page" && b.child_page?.title === title,
+          );
+          if (hit || !r.has_more) break;
+          cursor = r.next_cursor ?? "";
+          if (!cursor) break;
+        }
         if (!hit) return null;
         // Read the first paragraph back as the summary — this is the read-back
         // that proves the body actually landed, not just the page shell.
