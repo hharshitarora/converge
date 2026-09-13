@@ -1,0 +1,24 @@
+{
+  "name": "converge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Declarative, convergent execution for multi-app AI agents. Plan/apply, not fire-and-forget.",
+  "bin": {
+    "converge": "./src/cli.ts"
+  },
+  "scripts": {
+    "converge": "tsx src/cli.ts",
+    "eval": "tsx evals/run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
