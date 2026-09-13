@@ -54,7 +54,7 @@ wrong in 14 of 28 scenarios.
 |---|---|
 | Scenarios / invariants | **53 / 6**, all passing |
 | Baseline agent, same faults | **14 of 28** scenarios left the world wrong |
-| Baseline, same job run 3× | **10 duplicate objects** (we produce 0) |
+| Baseline, same job run 3× | **12 duplicate objects** (we produce 0) |
 | Apps integrated | **4** — Slack, Notion, Linear, GitHub |
 | Convergence, typical | **2 passes** (1 to act, 1 to verify) |
 
@@ -91,10 +91,13 @@ one workflow. We deliberately picked a boring, legible workflow so the execution
 was the interesting part rather than the domain.
 
 **"Did the tests actually find anything?"**
-Two real bugs, both in the README. An infinite create loop when a Slack channel was
+Three real bugs, all in the README. An infinite create loop when a Slack channel was
 archived (it still owns the name, so the create could never succeed), and a frozen pass
-counter that made "fail only on pass 1" mean "fail on every pass". Neither was found by
-reading the code.
+counter that made "fail only on pass 1" mean "fail on every pass". And a duplicated Slack
+message: planning read every resource at once, but the message is found by searching its
+channel, so it needs the channel's id first — with an empty ledger it was looked up too
+early, reported absent, and posted twice. Reads now run in dependency layers. None of the
+three was found by reading the code.
 
 ## What to say if asked what you'd do next
 
