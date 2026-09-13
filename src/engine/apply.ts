@@ -72,6 +72,7 @@ export async function apply(
   const ctxWithCapture: RunContext = ctx;
 
   let plan: Plan = { goal: spec.goal, changes: [], blind: [], converged: false };
+  let initialPlan: Plan | undefined;
   let pass = 0;
 
   while (pass < maxPasses) {
@@ -82,6 +83,9 @@ export async function apply(
     // every later pass it is simultaneously the verification of the pass
     // before it and the plan for this one.
     plan = await buildPlan(spec, providers, ctxWithCapture);
+    // Pass 1's plan is the statement of intent -- what a human would approve.
+    // Later passes are verification, and converge toward empty.
+    if (!initialPlan) initialPlan = plan;
 
     ctxWithCapture.trace({
       op: "pass",
@@ -122,6 +126,7 @@ export async function apply(
     goal: spec.goal,
     passes: pass,
     converged: plan.converged,
+    initialPlan: initialPlan ?? plan,
     finalPlan: plan,
     created: [...new Set(created)],
     updated: [...new Set(updated)],

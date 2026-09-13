@@ -153,6 +153,8 @@ export interface ApplyResult {
   goal: string;
   passes: number;
   converged: boolean;
+  /** What pass 1 intended to do. This is the plan a human approves. */
+  initialPlan: Plan;
   /** Final plan. Converged means this is empty. This IS the verification. */
   finalPlan: Plan;
   created: ResourceKey[];

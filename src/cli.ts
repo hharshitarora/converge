@@ -184,6 +184,11 @@ async function main() {
     return;
   }
 
+  if (cmd === "demo") {
+    await runDemo();
+    return;
+  }
+
   if (cmd === "reset") {
     world.reset();
     world.save(WORLD_FILE);
@@ -293,7 +298,7 @@ async function main() {
   const result = await apply(spec, registry.providers, ctx);
   if (!live) world.save(WORLD_FILE);
 
-  renderPlan(result.finalPlan, spec);
+  renderPlan(result.initialPlan, spec);
 
   const verdict = result.converged
     ? C.green("CONVERGED")
@@ -303,8 +308,11 @@ async function main() {
 
   console.log(
     "  " + verdict + C.grey(
-      "  in " + result.passes + " pass" + (result.passes === 1 ? "" : "es") +
-        ", " + (Date.now() - t0) + "ms",
+      result.converged
+        ? "  verified by read-back in " + result.passes +
+          " pass" + (result.passes === 1 ? "" : "es") + ", " + (Date.now() - t0) + "ms"
+        : "  after " + result.passes + " pass" + (result.passes === 1 ? "" : "es") +
+          ", " + (Date.now() - t0) + "ms",
     ),
   );
   if (result.created.length)
@@ -333,6 +341,100 @@ async function main() {
   console.log();
 
   if (!result.converged) process.exitCode = 2;
+}
+
+/**
+ * The scripted demo.
+ *
+ * Each step really does shell out to the CLI, so what is on screen is the tool
+ * being used, not a recording pretending to be one. Beats are paced for a
+ * two-minute take with no typing and nothing to fumble.
+ */
+async function runDemo() {
+  const { spawnSync } = await import("node:child_process");
+  const self = fileURLToPath(import.meta.url);
+  // Run each step through tsx, the same way a user would via `npm run converge`.
+  const tsx = path.join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
+
+  const step = (title: string, note: string, args: string[], pause = 1400) => {
+    console.log();
+    console.log("  " + "\x1b[7m " + title + " \x1b[0m");
+    if (note) console.log("  " + C.dim(note));
+    console.log("  " + C.grey("$ converge " + args.join(" ")));
+    spawnSync(process.execPath, [tsx, self, ...args], {
+      stdio: "inherit",
+      env: { ...process.env },
+    });
+    return new Promise((r) => setTimeout(r, pause));
+  };
+
+  console.log();
+  console.log("  " + C.bold("CONVERGE") + C.grey("  -- an agent that cannot corrupt your apps"));
+
+  await step("1. Start clean", "Nothing exists yet in any of the four apps.", ["reset"], 700);
+
+  await step(
+    "2. One request, four apps",
+    "The model plans; it never acts. Its output is a document, not tool calls.",
+    ["run", "Onboard Acme Corp, Pro tier, primary contact ops@acme.com"],
+    2200,
+  );
+
+  await step(
+    "3. Run it again",
+    "Idempotent by construction: there is nothing left to do, so nothing happens.",
+    ["reapply"],
+    1800,
+  );
+
+  await step(
+    "4. Now break it, the way a human does",
+    "Archive the Slack channel and delete the Notion record by hand.",
+    ["break", "slack-channel"],
+    500,
+  );
+  await step("", "", ["break", "notion-page"], 900);
+
+  await step(
+    "5. The agent notices",
+    "Same call that produced the plan is now drift detection. They cannot disagree.",
+    ["drift"],
+    2200,
+  );
+
+  await step(
+    "6. It repairs exactly that, and nothing else",
+    "Watch the census afterwards: still one of each. Nothing duplicated.",
+    ["reapply"],
+    1800,
+  );
+  await step("", "", ["census"], 1800);
+
+  await step(
+    "7. The fault that duplicates everyone else's agent",
+    "lost_ack: the write LANDED, but the acknowledgement was lost. A retrying agent makes a second channel here.",
+    ["reset"],
+    600,
+  );
+  await step(
+    "",
+    "Writes are never retried in-pass. The next pass re-observes -- and finds it already exists.",
+    ["run", "Onboard Acme Corp, Pro tier", "--fault", "lost_ack:slack.channel:create", "-v"],
+    2500,
+  );
+
+  console.log();
+  console.log("  " + "\x1b[7m 8. How we know it works \x1b[0m");
+  console.log("  " + C.dim("53 scenarios, seeded and reproducible, against a conventional retrying agent."));
+  console.log("  " + C.grey("$ npm run eval"));
+  spawnSync(process.execPath, [tsx, path.join(ROOT, "evals", "run.ts")], {
+    stdio: "inherit",
+  });
+
+  console.log();
+  console.log("  " + C.bold("Reads may be retried. Writes may never be."));
+  console.log("  " + C.dim("Recovery comes from re-observing, not from retrying."));
+  console.log();
 }
 
 main().catch((e) => {
