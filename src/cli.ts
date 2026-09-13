@@ -4,10 +4,11 @@ import { fileURLToPath } from "node:url";
 import { apply } from "./engine/apply.js";
 import { buildPlan } from "./engine/plan.js";
 import { FileStateLedger } from "./engine/state.js";
-import { FaultInjector, type FaultRule } from "./faults.js";
+import { FaultInjector, type FaultMode, type FaultRule } from "./faults.js";
 import { buildRegistry, MockWorld } from "./providers/index.js";
 import { compile } from "./compile.js";
 import { templateSpec } from "./spec.js";
+import { fragmentHtml, standaloneHtml, writeReport } from "./report.js";
 import type { Plan, RunContext, Spec, TraceEvent } from "./types.js";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -16,6 +17,7 @@ const WORLD_FILE = path.join(DIR, "world.json");
 const STATE_FILE = path.join(DIR, "state.json");
 const SPEC_FILE = path.join(DIR, "spec.json");
 const TRACE_DIR = path.join(DIR, "traces");
+const REPORT_FILE = path.join(DIR, "report.html");
 
 // --- tiny ANSI helpers ---------------------------------------------------
 const C = {
@@ -171,6 +173,7 @@ async function main() {
         "  " + C.cyan("forget") + "              delete the state ledger, then converge again",
         "  " + C.cyan("break") + " <target>      damage the mock world like a human would",
         "  " + C.cyan("census") + "              count objects in the mock world",
+        "  " + C.cyan("demo") + "                run the scripted two-minute demo",
         "  " + C.cyan("reset") + "               wipe the mock world and ledger",
         "",
         "  flags: -v  verbose trace",
@@ -272,6 +275,19 @@ async function main() {
   const g = {
     injector,
     pass: () => ctx.pass,
+    // Silent faults never throw, so nothing else would ever record them --
+    // and those are precisely the ones worth seeing in the evidence. Loud
+    // faults are already attached to the failed call that raised them.
+    onFault: (mode: FaultMode, op: string, kind: string) => {
+      if (!FaultInjector.reportsAsSuccess(mode)) return;
+      ctx.trace({
+        op: op as TraceEvent["op"],
+        kind,
+        ok: false,
+        fault: mode,
+        detail: "injected silently; the call reported success",
+      });
+    },
   };
   const registry = buildRegistry(process.env, g, world);
 
@@ -336,8 +352,30 @@ async function main() {
   }
 
   const traceFile = saveTrace(events, ctx.runId);
+
+  // Evidence report: every call, its latency, its outcome, and what was
+  // injected. Folds in the latest eval results when they exist.
+  let evalRows;
+  try {
+    evalRows = JSON.parse(fs.readFileSync(path.join(DIR, "eval-report.json"), "utf8"));
+  } catch {
+    evalRows = undefined;
+  }
+  const reportInput = {
+    events,
+    goal: spec.goal,
+    modes: registry.modes,
+    converged: result.converged,
+    passes: result.passes,
+    durationMs: Date.now() - t0,
+    evalRows,
+  };
+  writeReport(REPORT_FILE, standaloneHtml(reportInput));
+  writeReport(path.join(DIR, "report.fragment.html"), fragmentHtml(reportInput));
+
   console.log();
-  console.log("  " + C.grey("trace: " + path.relative(ROOT, traceFile) + " (" + events.length + " events)"));
+  console.log("  " + C.grey("trace:    " + path.relative(ROOT, traceFile) + " (" + events.length + " events)"));
+  console.log("  " + C.grey("evidence: " + path.relative(ROOT, REPORT_FILE)));
   console.log();
 
   if (!result.converged) process.exitCode = 2;

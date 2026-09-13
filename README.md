@@ -136,6 +136,20 @@ Inject faults on any run:
 npm run converge -- run "Onboard Acme Corp" --fault lost_ack:slack.channel:create -v
 ```
 
+### Evidence
+
+Every run writes `.converge/report.html` — open it in a browser. It shows how the run
+converged pass by pass, then every single provider call in order: which resource, which
+operation, how long it took, what came back, and which fault was injected. The latest
+eval results are folded in underneath.
+
+That report is the point of the design, not a nicety. Because convergence is defined as
+"a fresh read found nothing left to do", **the evidence that the run succeeded is the
+same evidence that produced it** — there is no separate success signal that could
+disagree with reality.
+
+Raw per-call traces are written as JSONL to `.converge/traces/`.
+
 ### Going live
 
 Everything above runs with no credentials. To hit real APIs, set `CONVERGE_LIVE=1` and

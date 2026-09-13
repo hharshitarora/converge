@@ -115,6 +115,16 @@ export class FaultInjector {
     return mode === "lost_ack" || mode === "partial_write";
   }
 
+  /**
+   * Faults the caller is never told about. `lost_ack` still raises, so the
+   * failed call carries it; `partial_write` returns success, so unless it is
+   * recorded here it leaves no trace at all -- which is exactly what makes it
+   * the most dangerous mode to test against.
+   */
+  static reportsAsSuccess(mode: FaultMode): boolean {
+    return mode === "partial_write";
+  }
+
   static toError(mode: FaultMode): FaultInjected {
     const messages: Record<FaultMode, string> = {
       error_500: "500 Internal Server Error (injected)",

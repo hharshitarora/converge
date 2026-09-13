@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { apply } from "../src/engine/apply.js";
 import { MemoryStateLedger } from "../src/engine/state.js";
-import { FaultInjector } from "../src/faults.js";
+import { FaultInjector, type FaultMode } from "../src/faults.js";
 import { MockWorld } from "../src/providers/mockworld.js";
 import { buildRegistry } from "../src/providers/index.js";
 import { resetMockIds } from "../src/providers/support.js";
@@ -85,7 +85,15 @@ async function runScenario(sc: Scenario): Promise<ScenarioOutcome> {
       env: {},
       trace: (e) => events.push({ ...e, ts: Date.now(), runId: "eval", pass: 0 } as TraceEvent),
     };
-    const g = { injector: activeInjector, pass: () => ctx.pass };
+    const g = {
+      injector: activeInjector,
+      pass: () => ctx.pass,
+      onFault: (mode: FaultMode, op: string, kind: string) => {
+        if (!FaultInjector.reportsAsSuccess(mode)) return;
+        ctx.trace({ op: op as TraceEvent["op"], kind, ok: false, fault: mode,
+          detail: "injected silently; the call reported success" });
+      },
+    };
     const registry = buildRegistry({}, g, world);
 
     lastResult = await apply(s, registry.providers, ctx, { maxPasses: MAX_PASSES });
