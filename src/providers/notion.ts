@@ -126,7 +126,17 @@ export function liveNotion(token: string, g: GuardCtx): NotionClient {
       throw new Error(`notion ${p}: ${res.status} ${JSON.stringify(json).slice(0, 200)}`);
     return json;
   };
-  const norm = (id: string) => id.replace(/-/g, "");
+  /**
+   * Accept whatever a human pasted. Notion ids appear as bare hex, dashed
+   * UUIDs, full page URLs, and URLs with a `?v=` view parameter; the last is
+   * easy to copy by accident from a database view and produces a 404 that
+   * looks exactly like a permissions problem.
+   */
+  const norm = (id: string) => {
+    const cleaned = id.split("?")[0] ?? id;
+    const hex = cleaned.replace(/[^0-9a-fA-F]/g, "");
+    return hex.slice(-32);
+  };
 
   return {
     findPage: (parentId, title) =>
@@ -157,10 +167,26 @@ export function liveNotion(token: string, g: GuardCtx): NotionClient {
 
     createPage: (parentId, title, summary) =>
       guard(g, "create", K, async () => {
+        // Notion answers 404 both for "does not exist" and "your integration
+        // cannot see it", and a database id pointed at this provider produces
+        // the same 404 a third way. Three very different fixes behind one
+        // status code, so name which one it is before failing.
+        const parent = norm(parentId);
+        const asDb = await fetch("https://api.notion.com/v1/databases/" + parent, {
+          headers: H,
+        });
+        if (asDb.ok) {
+          throw new Error(
+            "notion: NOTION_PARENT_PAGE_ID points at a database, not a page. " +
+              "This provider creates child pages under a page parent. Create a " +
+              "plain page, share it with the integration, and use its id.",
+          );
+        }
+
         const r = (await api("/pages", {
           method: "POST",
           body: JSON.stringify({
-            parent: { page_id: parentId },
+            parent: { page_id: parent },
             properties: { title: { title: [{ text: { content: title } }] } },
             children: summary
               ? [

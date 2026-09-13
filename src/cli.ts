@@ -133,10 +133,15 @@ function newCtx(
       if (verbose || e.fault || !e.ok) {
         const mark = e.ok ? C.grey("·") : C.red("x");
         const fault = e.fault ? C.red(" [" + e.fault + "]") : "";
+        // On failure the error is the useful half; the policy note ("not
+        // retried in-pass") is context. Showing only the note hid a message
+        // written specifically to tell someone how to fix their setup.
+        const body = e.ok
+          ? C.grey(e.detail ?? "")
+          : C.red(e.error ?? "") + (e.detail ? C.grey("  (" + e.detail + ")") : "");
         console.log(
           "    " + mark + " " + C.grey(String(e.op).padEnd(10)) +
-            C.grey((e.key ?? "").padEnd(28)) +
-            C.grey(e.detail ?? e.error ?? "") + fault,
+            C.grey((e.key ?? "").padEnd(28)) + body + fault,
         );
       }
     },

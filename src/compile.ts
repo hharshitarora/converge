@@ -108,7 +108,10 @@ export async function compile(opts: CompileOptions): Promise<CompileResult> {
   const { request, notionParentId, linearTeamKey } = opts;
   const log = opts.onEvent ?? (() => {});
 
-  const apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
+  const raw = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
+  // An unfilled placeholder from .env.example is absence, not a credential.
+  const apiKey = raw && !/\.\.\.$/.test(raw.trim()) ? raw.trim() : undefined;
+
   if (!apiKey) {
     log("no ANTHROPIC_API_KEY; using the deterministic template planner");
     return {
@@ -138,14 +141,28 @@ export async function compile(opts: CompileOptions): Promise<CompileResult> {
   // validation errors. Two rounds is enough in practice, and bounding it keeps
   // a confused model from burning the clock.
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      system: SYSTEM,
-      tools: [TOOL],
-      tool_choice: { type: "tool", name: "emit_spec" },
-      messages,
-    });
+    let response: Anthropic.Message;
+    try {
+      response = await client.messages.create({
+        model: MODEL,
+        max_tokens: 16000,
+        system: SYSTEM,
+        tools: [TOOL],
+        tool_choice: { type: "tool", name: "emit_spec" },
+        messages,
+      });
+    } catch (e) {
+      // The planner being unreachable -- bad key, rate limit, outage -- must
+      // not take the onboarding down with it. This is the same principle the
+      // engine applies to the apps: degrade to something correct rather than
+      // fail the whole run. It was a crash until a placeholder key proved it.
+      log(
+        "planner unavailable (" +
+          (e instanceof Error ? e.message.slice(0, 60) : String(e)) +
+          "); falling back to the template planner",
+      );
+      break;
+    }
 
     const block = response.content.find(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",

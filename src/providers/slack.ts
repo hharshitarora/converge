@@ -151,24 +151,46 @@ export function mockSlack(world: MockWorld, g: GuardCtx): SlackClient {
 
 export function liveSlack(token: string, g: GuardCtx): SlackClient {
   const K = "slack.channel";
+
+  /**
+   * Listing private channels needs `groups:read` on top of `channels:read`.
+   * Rather than demand the broader scope from every install, we ask for both
+   * and narrow to public-only the first time Slack says `missing_scope`. An
+   * install that can see every public channel is far more useful than one that
+   * cannot read anything, and the narrowing is remembered so we do not pay a
+   * failed call per page.
+   */
+  let privateVisible = true;
+
   const call = async (method: string, body: Record<string, unknown>, get = false) => {
-    const url = `https://slack.com/api/${method}`;
+    const url = "https://slack.com/api/" + method;
     const res = get
-      ? await fetch(`${url}?${new URLSearchParams(body as Record<string, string>)}`, {
-          headers: { Authorization: `Bearer ${token}` },
+      ? await fetch(url + "?" + new URLSearchParams(body as Record<string, string>), {
+          headers: { Authorization: "Bearer " + token },
         })
       : await fetch(url, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: "Bearer " + token,
             "Content-Type": "application/json; charset=utf-8",
           },
           body: JSON.stringify(body),
         });
     const json = (await res.json()) as { ok: boolean; error?: string; [k: string]: unknown };
-    if (!json.ok) throw new Error(`slack.${method}: ${json.error ?? res.status}`);
+    if (!json.ok) throw new Error("slack." + method + ": " + (json.error ?? res.status));
     return json;
   };
+
+  interface ListResponse {
+    channels: {
+      id: string;
+      name: string;
+      is_archived: boolean;
+      topic?: { value: string };
+      purpose?: { value: string };
+    }[];
+    response_metadata?: { next_cursor?: string };
+  }
 
   return {
     findChannel: (name) =>
@@ -176,20 +198,27 @@ export function liveSlack(token: string, g: GuardCtx): SlackClient {
         let cursor = "";
         // Paginate: the channel we want may not be on page one, and a false
         // "not found" here would cause a duplicate create.
-        for (let i = 0; i < 10; i++) {
+        for (let page = 0; page < 20; page++) {
           const body: Record<string, string> = {
-            types: "public_channel,private_channel",
+            types: privateVisible ? "public_channel,private_channel" : "public_channel",
             limit: "200",
             exclude_archived: "false",
           };
           if (cursor) body.cursor = cursor;
-          const r = (await call("conversations.list", body, true)) as unknown as {
-            channels: { id: string; name: string; is_archived: boolean;
-              topic?: { value: string }; purpose?: { value: string } }[];
-            response_metadata?: { next_cursor?: string };
-          };
+
+          let r: ListResponse;
+          try {
+            r = (await call("conversations.list", body, true)) as unknown as ListResponse;
+          } catch (e) {
+            if (privateVisible && /missing_scope/.test(String(e))) {
+              privateVisible = false;
+              continue; // same page, narrower scope
+            }
+            throw e;
+          }
+
           const hit = r.channels.find((c) => c.name === name);
-          if (hit)
+          if (hit) {
             return {
               id: hit.id,
               name: hit.name,
@@ -197,11 +226,13 @@ export function liveSlack(token: string, g: GuardCtx): SlackClient {
               purpose: hit.purpose?.value ?? "",
               archived: hit.is_archived,
             };
+          }
           cursor = r.response_metadata?.next_cursor ?? "";
           if (!cursor) break;
         }
         return null;
       }),
+
     createChannel: (name) =>
       guard(g, "create", K, async () => {
         const r = (await call("conversations.create", { name })) as unknown as {
@@ -209,18 +240,22 @@ export function liveSlack(token: string, g: GuardCtx): SlackClient {
         };
         return { id: r.channel.id };
       }),
+
     setTopic: (channel, topic) =>
       guard(g, "update", K, async () => {
         await call("conversations.setTopic", { channel, topic });
       }),
+
     setPurpose: (channel, purpose) =>
       guard(g, "update", K, async () => {
         await call("conversations.setPurpose", { channel, purpose });
       }),
+
     unarchive: (channel) =>
       guard(g, "update", K, async () => {
         await call("conversations.unarchive", { channel });
       }),
+
     archive: (channel) =>
       guard(g, "update", K, async () => {
         await call("conversations.archive", { channel });
