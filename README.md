@@ -123,6 +123,12 @@ message has no name, so what is its natural key? We embed a zero-width marker de
 from the resource key and search the channel for it. Post it twice and the second run
 finds the first rather than duplicating it.
 
+It produces one genuinely pleasing behaviour we did not write any code for. Delete the
+Notion record and converge again: the page is recreated with a *new* id, the message that
+quoted the old one no longer matches its desired text, and so it is rewritten to point at
+the new page. **Cross-app referential integrity falls out of convergence for free** —
+because "correct" is defined over the whole desired state, not per step.
+
 Each app resolves to live or twin **independently**, based on whether its credential is
 present — so if one token expires mid-demo, the other three still run for real.
 

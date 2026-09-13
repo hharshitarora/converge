@@ -92,6 +92,11 @@ function short(s: string) {
   return s.length > 46 ? s.slice(0, 46) + "..." : s;
 }
 
+/** Remove the zero-width identity marker so the message reads as a human sees it. */
+function stripMarker(s: string) {
+  return s.replace(/[​‌]/g, "");
+}
+
 function newCtx(
   injector: FaultInjector,
   world: MockWorld,
@@ -174,6 +179,7 @@ async function main() {
         "  " + C.cyan("forget") + "              delete the state ledger, then converge again",
         "  " + C.cyan("break") + " <target>      damage the mock world like a human would",
         "  " + C.cyan("census") + "              count objects in the mock world",
+        "  " + C.cyan("message") + "             show the kickoff brief the agent composed",
         "  " + C.cyan("demo") + "                run the scripted two-minute demo",
         "  " + C.cyan("reset") + "               wipe the mock world and ledger",
         "",
@@ -209,6 +215,28 @@ async function main() {
       console.log("  " + (APP_LABEL[k] ?? k) + String(v).padStart(3));
     }
     console.log();
+    return;
+  }
+
+  if (cmd === "message") {
+    // Show what actually got posted, markers stripped. The point is that the
+    // ids in it came from the other three apps.
+    const msgs = world.data.slack.messages;
+    if (!msgs.length) {
+      console.log(C.grey("  no messages posted yet"));
+      return;
+    }
+    for (const m of msgs) {
+      const ch = world.data.slack.channels.find((c) => c.id === m.channelId);
+      console.log();
+      console.log("  " + C.cyan("#" + (ch?.name ?? m.channelId)));
+      for (const line of stripMarker(m.text).split("\n")) {
+        console.log("  " + C.grey("| ") + line);
+      }
+      console.log();
+      console.log("  " + C.dim("every id above was returned by another app during this run"));
+      console.log();
+    }
     return;
   }
 
@@ -420,14 +448,21 @@ async function runDemo() {
   );
 
   await step(
-    "3. Run it again",
+    "3. The apps are one workflow, not four integrations",
+    "The kickoff brief is composed from what the other three apps returned.",
+    ["message"],
+    2400,
+  );
+
+  await step(
+    "4. Run it again",
     "Idempotent by construction: there is nothing left to do, so nothing happens.",
     ["reapply"],
     1800,
   );
 
   await step(
-    "4. Now break it, the way a human does",
+    "5. Now break it, the way a human does",
     "Archive the Slack channel and delete the Notion record by hand.",
     ["break", "slack-channel"],
     500,
@@ -435,14 +470,14 @@ async function runDemo() {
   await step("", "", ["break", "notion-page"], 900);
 
   await step(
-    "5. The agent notices",
+    "6. The agent notices",
     "Same call that produced the plan is now drift detection. They cannot disagree.",
     ["drift"],
     2200,
   );
 
   await step(
-    "6. It repairs exactly that, and nothing else",
+    "7. It repairs exactly that, and nothing else",
     "Watch the census afterwards: still one of each. Nothing duplicated.",
     ["reapply"],
     1800,
@@ -450,7 +485,7 @@ async function runDemo() {
   await step("", "", ["census"], 1800);
 
   await step(
-    "7. The fault that duplicates everyone else's agent",
+    "8. The fault that duplicates everyone else's agent",
     "lost_ack: the write LANDED, but the acknowledgement was lost. A retrying agent makes a second channel here.",
     ["reset"],
     600,
