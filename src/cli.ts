@@ -460,7 +460,11 @@ async function runDemo() {
     console.log("  " + C.grey("$ converge " + args.join(" ")));
     spawnSync(process.execPath, [tsx, self, ...args], {
       stdio: "inherit",
-      env: { ...process.env },
+      // The scripted demo always runs against the twins, whatever .env says.
+      // It is about the execution model, so it has to be fast, repeatable and
+      // safe to run on stage -- and `break` can only damage a world we own.
+      // Prove the live integrations separately with a real `run`.
+      env: { ...process.env, CONVERGE_LIVE: "0" },
     });
     return new Promise((r) => setTimeout(r, pause));
   };

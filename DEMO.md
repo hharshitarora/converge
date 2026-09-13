@@ -1,5 +1,32 @@
 # Two-minute demo script
 
+## Record it in two takes
+
+**Take A — the live proof (~25 seconds).** One command against your real apps:
+
+```bash
+npm run converge -- run "Onboard Acme Corp, Pro tier, primary contact ops@acme.com"
+```
+
+The header reads `slack=live notion=live linear=live github=live`. Then cut to the four
+apps side by side: `#acme-corp-onboarding` with the kickoff brief, the Acme Corp page in
+Notion, HAR-5/6/7 in Linear, `acme-corp-integration` on GitHub. This is the beat that
+satisfies "clearly prove each of the 3+ integrations was used".
+
+**Take B — the mechanism (~90 seconds).** One command, fully scripted, ~29 seconds of
+tool time:
+
+```bash
+npm run converge -- demo
+```
+
+This always runs against the local twins regardless of `.env` — it has to be fast,
+repeatable, and safe to break on camera. Narrate over it using the beats below.
+
+Splice A in front of B. Nothing to type on camera in either take.
+
+---
+
 Run `npm run converge -- demo` and narrate over it. The sequence is scripted — no typing,
 nothing to fumble. About 28 seconds of tool time, so you have room to talk.
 
